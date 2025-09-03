@@ -13,6 +13,7 @@ This repository contains Jupyter notebooks and CSV datasets generated using the 
 ## 📂 Repository Structure
 
 - `data/`: Raw CSV datasets generated via ee-hpc.
+- `jube_configs/`: JUBE configuration files.
 - `notebooks/`: Jupyter notebooks for data exploration and analysis.
 - `results/`: Processed outputs and visualizations.
 
