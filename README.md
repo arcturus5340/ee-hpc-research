@@ -28,6 +28,8 @@ cd ee-hpc-research
 
 2. Navigate to the `notebooks/` directory and open the desired notebook:
 
+```
 jupyter notebook
+```
 
 3. Follow the instructions within each notebook to reproduce the analyses.
