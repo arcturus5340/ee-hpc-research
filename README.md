@@ -21,8 +21,10 @@ This repository contains Jupyter notebooks and CSV datasets generated using the 
 
 1. Clone the repository:
 
+```
 git clone https://github.com/arcturus5340/ee-hpc-research.git
 cd ee-hpc-research
+```
 
 2. Navigate to the `notebooks/` directory and open the desired notebook:
 
