@@ -1,0 +1,1098 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jube>
+    <benchmark name="ICON" outpath="jube-runs">
+
+        <parameterset name="system_pset" init_with="platform.xml:systemParameter">
+            <parameter name="jobname">ICON_R2B7N7</parameter>
+            <parameter name="nodes" type="int">1</parameter>
+            <parameter name="taskspernode" mode="python" type="int">int(96/$threadspertask)</parameter>
+            <parameter name="threadspertask" type="int">1,2,4,6,8,12,16,24</parameter>
+            <parameter name="additional_job_config">#SBATCH --exclusive</parameter>
+            <parameter name="timelimit">02:00:00</parameter>
+<!--            <parameter name="timelimit" mode="python" type="str">-->
+<!--                base_hours = 2-->
+<!--                hours = base_hours * int($iconsteps)-->
+<!--                # cap maximum at 48 hours-->
+<!--                hours = min(hours, 48)-->
+<!--                "{:02d}:00:00".format(hours)-->
+<!--            </parameter>-->
+            <parameter name="additional_job_config">#SBATCH --hwc=likwid</parameter>
+            <parameter name="queue">c23ms</parameter>
+            <parameter name="iconsteps" type="int">1,100,250,500</parameter>
+            <parameter name="cpufreq" type="int">1000000,1500000,2000000,2500000,3000000,3500000,3800000</parameter>
+            <parameter name="additional_job_config">#SBATCH --cpu-freq=$cpufreq-$cpufreq:performance</parameter>
+
+            <parameter name="preprocess" separator="">
+                <![CDATA[
+# put the right modules
+module purge
+module load iimpi/2022a
+module load netCDF
+module load netCDF-Fortran
+module load HDF5/1.12.2
+module load imkl/2022.1.0
+module load CMake
+module load binutils
+module load likwid/5.4
+module load hwloc
+
+
+export LIKWID_ROOT=/cvmfs/software.hpc.rwth.de/Linux/RH9/x86_64/intel/sapphirerapids/software/likwid/5.4.1-GCCcore-11.3.0
+#export OTFCPT_OPTIONS="stopped=1"
+
+# some libraries
+AEC_ROOT='/path/to/libaec-install'
+export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${AEC_ROOT}/lib64
+echo $LD_LIBRARY_PATH
+
+#=============================================================================
+set +x
+ulimit -s unlimited
+#TODO adjust default steps or define ICON_NSTEPS outside
+nsteps=$iconsteps
+#=============================================================================
+#
+# OpenMP environment variables
+# ----------------------------
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
+export ICON_THREADS=${OMP_NUM_THREADS}
+export OMP_SCHEDULE=dynamic,1
+export OMP_DYNAMIC="false"
+export OMP_STACKSIZE=200M
+
+#
+# MPI variables
+# -------------
+THREADS_PER_CORE=${SBATCH_THREADS_PER_CORE:-2}
+if [[ ${THREADS_PER_CORE} = 2 ]];
+then
+HINT="multithread"
+else
+HINT="nomultithread"
+fi
+no_of_nodes=${SLURM_JOB_NUM_NODES:=1}
+mpi_procs_pernode=$((${SLURM_JOB_CPUS_PER_NODE%%\(*} / 2 * ${THREADS_PER_CORE} / OMP_NUM_THREADS))
+
+((mpi_total_procs=no_of_nodes * mpi_procs_pernode))
+#
+# blocking length
+# ---------------
+nproma=32
+nproma_rad=32
+nblocks_c=0
+#=============================================================================
+
+# environment variables for the experiment and the target system
+# --------------------------------------------------------------
+export EXPNAME="ICON_R2B7N7.$SLURM_JOB_ID"
+
+#TODO adjust to site installation
+export ECCODES_DEFINITION_PATH=/path/to/eccodes-2.30.0/share/eccodes/definitions
+
+#TODO maybe adjust to site cluster
+export KMP_AFFINITY=scatter
+export SLURM_DIST_PLANESIZE="8"
+export KMP_LIBRARY="turnaround"
+export OMPI_MCA_osc="pt2pt"
+export UCX_IB_ADDR_TYPE="ib_global"
+export OMPI_MCA_coll="^ml"
+export OMPI_MCA_coll_hcoll_enable="1"
+export HCOLL_MAIN_IB="hfi1_0:1"
+# export UCX_NET_DEVICES="hfi1_0:1"
+export UCX_TLS="mm,cma,ib,self"
+export UCX_UNIFIED_MODE="y"
+export HDF5_USE_FILE_LOCKING="FALSE"
+export OMPI_MCA_io="romio321"
+export MALLOC_TRIM_THRESHOLD_="-1"
+
+#=============================================================================
+
+# directories with absolute paths
+# -------------------------------
+thisdir=$(pwd)
+#TODO adjust to local build
+basedir="/path/to/icon-2.6.6"
+experiments_dir="${experiments_dir:=${basedir}/experiments}"
+export basedir
+
+# how to start the icon model
+# ---------------------------
+export START="$MPIEXEC $FLAGS_MPI_BATCH env LD_PRELOAD=/path/to/ee-cpt/libEECPT.impi.so OMP_TOOL_LIBRARIES=/path/to/ee-cpt/libEECPT.impi.so"
+#echo "START: $START"
+
+#TODO local binary
+export MODEL="/path/to/icon-2.6.6/bin/icon-plain"
+
+# how to submit the next job
+# --------------------------
+submit="sbatch"
+job_name="ICON_R2B7N7"
+
+# cdo for post-processing
+# -----------------------
+cdo="cdo"
+cdo_diff="cdo diffn"
+
+# define script functions used in the experiment run script
+# ---------------------------------------------------------
+. ${basedir}/run/add_run_routines
+
+#=============================================================================
+
+ulimit -s 2097152
+ulimit -c 0
+
+# ======================== START of exec.icon.prolog ========================= #
+
+make_and_change_to_experiment_dir # function in ../add_run_routines
+export EXPDIR
+
+# Combine START and MODEL if START_MODEL is not already set.
+# START_MODEL is used to ease the execution of a machine that uses a complex
+# mpirun command with multiple binaries
+START_MODEL="${START_MODEL:=$START $MODEL}"
+echo "START_MODEL: $START_MODEL"
+
+# ======================== END of exec.icon.prolog   ========================= #
+# ----------------------------------------------------------------------
+# path definitions
+# ----------------------------------------------------------------------
+
+# base directory for ICON sources, binary and auxilary data:
+ICONDIR=$(cd $(dirname "$MODEL")/..; pwd)
+echo "ICONDIR: $ICONDIR"
+
+# experiment identifier for output files
+EXP="NWP"    # experiment identifier
+
+# root directory for input data
+#TODO adjust to content from .tar
+DATAROOT=/path/to/icon_r2b7
+
+GRIDDIR=$DATAROOT
+EXTPDIR="$GRIDDIR" # external parameter directory
+
+# absolute path to input directory - for the time being
+INDIR=${DATAROOT}
+
+# ----------------------------------------------------------------------
+# copy input data: grids, external parameters
+# ----------------------------------------------------------------------
+
+ln -sf $GRIDDIR/domain1_DOM01.parent.nc DOM00.nc
+ln -sf $GRIDDIR/domain1_DOM01.nc DOM01.nc
+ln -sf $GRIDDIR/domain2_DOM02.nc DOM02.nc
+
+ln -sf $EXTPDIR/external_parameter_icon_domain1_DOM01_tiles.nc extpar_DOM01.nc
+ln -sf $EXTPDIR/external_parameter_icon_domain2_DOM02_tiles.nc extpar_DOM02.nc
+
+# files needed for radiation
+ln -sf ${ICONDIR}/externals/ecrad/data ecrad_data
+
+
+# ----------------------------------------------------------------------
+# global namelist settings
+# ----------------------------------------------------------------------
+
+# the namelist filename
+atmo_namelist=NAMELIST_${EXP}
+
+# global timing
+start_date="2022-08-22T00:00:00Z"
+ndays_restart=120
+dt_restart=`expr ${ndays_restart} \* 86400`
+
+dtime=$(( 360 / 1 ))
+
+# the grid parameters
+atmo_dyn_grids="DOM01.nc"
+atmo_rad_grids="DOM00.nc"
+
+ln -sf $INDIR/igfff00000000_DOM01.nc initial_DOM01.nc
+ln -sf $INDIR/igfff00000000_DOM02.nc initial_DOM02.nc
+
+# ----------------------------------------------------------------------
+# create ICON master namelist
+# ----------------------------------------------------------------------
+
+# For a complete list see Namelist_overview and Namelist_overview.pdf
+
+echo "create ICON master namelist"
+cat > icon_master.namelist <<EOF_NML
+&master_nml
+lrestart               = .false.
+/
+&time_nml
+ini_datetime_string = "$start_date"
+dt_restart          = $dt_restart
+/
+&master_model_nml
+model_type=1
+model_name="ATMO"
+model_namelist_filename="$atmo_namelist"
+model_min_rank=1
+model_max_rank=65536
+model_inc_rank=1
+/
+EOF_NML
+
+
+# ----------------------------------------------------------------------
+# model namelists
+# ----------------------------------------------------------------------
+
+echo "model namelists"
+# reconstrcuct the grid parameters in namelist form
+dynamics_grid_filename=""
+for gridfile in ${atmo_dyn_grids}; do
+dynamics_grid_filename="${dynamics_grid_filename} '${gridfile}',"
+done
+radiation_grid_filename=""
+for gridfile in ${atmo_rad_grids}; do
+radiation_grid_filename="${radiation_grid_filename} '${gridfile}',"
+done
+
+
+num_io_procs=0
+num_restart_procs=0
+num_prefetch_proc=0
+num_io_procs_radar=0
+
+echo "LOCATION: atmo_namelist"
+cat > ${atmo_namelist} <<EOF_NML2
+&parallel_nml
+nproma                  =  ${nproma}
+! nproma_sub  = $nproma_rad
+nblocks_c               =  ${nblocks_c:-0} ! does not work with nesting. TODO make this work (maybe)
+p_test_run              = .false.
+l_test_openmp           = .true.
+l_log_checks            = .true.
+num_io_procs            =  ${num_io_procs}
+num_restart_procs       = ${num_restart_procs}
+num_prefetch_proc       = ${num_prefetch_proc}
+num_io_procs_radar      = ${num_io_procs_radar}
+itype_comm              =  1
+iorder_sendrecv         =  3
+proc0_shift             = 0
+use_omp_input           = .true.
+/
+&grid_nml
+dynamics_grid_filename  = ${dynamics_grid_filename}
+radiation_grid_filename = ${radiation_grid_filename}
+dynamics_parent_grid_id = 0,1
+lredgrid_phys           = .true.,.true.,
+lfeedback               = .true.
+ifeedback_type          = 2
+!start_time              = 0., $dtime,
+!end_time                = 0., 432000.    ! ** bewirkt, dass das Nest nur bis vv=120h laueft **
+/
+&run_nml
+num_lev        = 90, 60
+lvert_nest     = .true.
+nsteps         = ${nsteps}
+dtime          = ${dtime}     ! timestep in seconds
+ldynamics      = .TRUE.       ! dynamics
+ltransport     = .true.
+ntracer        = 5            ! default: 0
+iforcing       = 3
+ltestcase      = .false.
+msg_level      = 7 ! detailed report during integration
+ltimer         = .true.
+timers_level   = 10
+check_uuid_gracefully = .true.
+output         = "none" ! "none" to turn off output
+/
+&initicon_nml
+init_mode                    = 7
+!dt_iau                       = 10800
+!dt_shift                     = -5400
+iterate_iau                  = .false.
+zpbl1                        = 500.
+zpbl2                        = 1000.
+dwdfg_filename               = "initial_DOM<idom>.nc"
+!dwdana_filename              = "initial_DOM<idom>.nc"
+ana_varnames_map_file        = "map_file.ana"
+ltile_coldstart              = .true.
+lvert_remap_fg               = .false.
+use_lakeiceana               = .true.
+lp2cintp_incr                = .TRUE.
+lp2cintp_sfcana              = .TRUE.
+/
+&io_nml
+itype_pres_msl               = 5        ! (1) 3: IFS-type extrapolation
+itype_rh                     = 1         ! (1) 2: mixed phase (water and ice)
+output_nml_dict              = 'map_file.fc'
+dt_checkpoint           = 2592000.  ! 30 days
+/
+&nwp_phy_nml
+inwp_gscp       = 1               ! 10 in test case 35
+inwp_convection = 1
+inwp_radiation  = 4 ! TODO: use, after fixing lredgrid_phys.
+!inwp_radiation  = 0
+inwp_cldcover   = 1 ! 3 geaendert ab Test2
+inwp_turb       = 1
+inwp_satad      = 1
+inwp_sso        = 1
+inwp_gwd        = 1
+inwp_surface    = 1
+latm_above_top  = .false.,.true.
+ldetrain_conv_prec = .false.,.false.
+efdt_min_raylfric = 7200.
+itype_z0         = 2
+icapdcycl        = 3
+icpl_aero_conv   = 1
+icpl_aero_gscp   = 1
+icpl_o3_tp       = 1
+dt_rad           = $(( 6 * $dtime )).
+dt_conv          = $(( 2 * $dtime ))., $(( 1 * $dtime )).
+dt_sso           = $(( 4 * $dtime ))., $(( 2 * $dtime )).
+dt_gwd           = $(( 4 * $dtime )).,
+/
+&nwp_tuning_nml
+itune_albedo  = 1
+tune_gkwake   = 1.5
+tune_gfrcrit  = 0.425
+tune_grcrit   = 0.5
+tune_gkdrag   = 0.16
+tune_zvz0i    = 0.85
+tune_box_liq_asy = 3.25
+tune_minsnowfrac = 0.2
+tune_gfluxlaun  = 3.75e-3
+tune_rcucov = 0.075
+tune_rhebc_land = 0.825
+/
+&turbdiff_nml
+tkhmin       = 0.6
+tkhmin_strat = 1.0
+tkmmin       = 0.75
+tkmmin_strat = 1.5
+pat_len      =  750.
+c_diff       =  0.2
+rat_sea      =  0.8
+rlam_heat    = 10.
+ltkesso      = .true.
+frcsmot      = 0.2
+imode_frcsmot = 2
+icldm_turb   = 1
+itype_sher   = 1
+ltkeshs      = .true.
+a_hshr       = 2.0
+/
+&lnd_nml
+ntiles         = 3
+nlev_snow      = 1
+lmulti_snow    = .false.
+itype_heatcond = 3
+idiag_snowfrac = 20
+itype_snowevap = 2
+itype_canopy   = 2
+lsnowtile      = .true.
+lseaice        = .FALSE. ! TODO: turn on after porting seaice
+llake          = .true.
+itype_lndtbl   = 4
+itype_evsl     = 4
+itype_root     = 2
+cwimax_ml      = 5.e-4
+c_soil         = 1.25
+c_soil_urb     = 0.5
+sstice_mode    = 2
+lprog_albsi    = .true.
+/
+&radiation_nml
+irad_o3     = 79
+irad_aero   = 6
+albedo_type = 2 ! Modis albedo
+direct_albedo = 4
+direct_albedo_water = 3
+albedo_whitecap = 1
+vmr_co2    = 390.e-06 ! values representative for 2012
+vmr_ch4    = 1800.e-09
+vmr_n2o    = 322.0e-09
+vmr_o2     = 0.20946
+vmr_cfc11  = 240.e-12
+vmr_cfc12  = 532.e-12
+ecrad_data_path = './ecrad_data'
+isolrad    = 1
+/
+&nonhydrostatic_nml
+itime_scheme    = 4
+vwind_offctr    = 0.2
+damp_height     = 44000.
+rayleigh_coeff  = 0.5
+divdamp_order   = 24
+divdamp_fac     = 0.004
+divdamp_type    = 32
+l_open_ubc      = .false.
+igradp_method   = 3
+l_zdiffu_t      = .true.
+thslp_zdiffu    = 0.02
+thhgtd_zdiffu   = 125.
+htop_moist_proc = 22500.
+hbot_qvsubstep  = 16000.
+/
+&sleve_nml
+min_lay_thckn   = 20.
+max_lay_thckn   = 400.
+htop_thcknlimit = 14000.
+top_height      = 75000.
+stretch_fac     = 0.9
+decay_scale_1   = 4000.
+decay_scale_2   = 2500.
+decay_exp       = 1.2
+flat_height     = 16000.
+/
+&dynamics_nml
+iequations     = 3
+idiv_method    = 1
+divavg_cntrwgt = 0.50
+lcoriolis      = .TRUE.
+/
+&transport_nml
+ctracer_list  = '12345'
+ivadv_tracer   = 3,3,3,3,3
+itype_hlimit   = 3,4,4,4,4,
+ihadv_tracer   = 52,2,2,2,2,
+llsq_svd       = .true. ! TODO: set to .false. and overwrite it with .true. in crosscheck if _OPENACC
+beta_fct       = 1.005
+iadv_tke       = 0
+nadv_substeps  = 3,2
+/
+&diffusion_nml
+hdiff_order      = 5
+itype_vn_diffu   = 1
+itype_t_diffu    = 2
+hdiff_efdt_ratio = 24.
+hdiff_smag_fac   = 0.025
+lhdiff_vn        = .TRUE.
+lhdiff_temp      = .TRUE.
+/
+&interpol_nml
+nudge_zone_width  = 8
+lsq_high_ord      = 3
+l_intp_c2l        = .true.
+l_mono_c2l        = .true.
+rbf_scale_mode_ll = 2
+support_baryctr_intp=.true.,
+/
+&gridref_nml
+grf_intmethod_e  = 6
+grf_scalfbk      = 2
+denom_diffu_v    = 150.
+/
+&extpar_nml
+itopo                = 1
+n_iter_smooth_topo   = 1,1
+hgtdiff_max_smooth_topo = 750.,750.,
+heightdiff_threshold = 3000.
+itype_vegetation_cycle = 2
+/
+&ensemble_pert_nml
+use_ensemble_pert=.false.,
+/
+&gribout_nml
+preset                          = "ensemble"
+perturbationNumber              = 1
+localTypeOfEnsembleForecast     = 101,
+numberOfForecastsInEnsemble     = 40,
+ldate_grib_act                  = .true.
+lgribout_24bit                  = .false.
+tablesVersion                   = 14
+backgroundProcess               = 0
+localNumberOfExperiment         = 52
+productionStatusOfProcessedData = 2
+generatingProcessIdentifier     = 1, 2                              ! 2 .. nest
+/
+&synsat_nml
+lsynsat=.false. ! .false.,.true., ! requires RTTOV library - left out for this test
+/
+!&output_nml
+! ! ---------------------------------------------------------- !
+! ! ---  IGLO: constant output fields - native grid, vv=0  --- !
+! ! ---------------------------------------------------------- !
+! filetype             = 2         ! output format: 2=GRIB2, 4=NETCDFv2
+! dom                  = 1                         ! write global domains
+! remap                = 0                         ! icon grid
+! output_time_unit     = 1                         ! 1: seconds
+! output_bounds        = 0., 0., 9999.             ! vv=0h
+! steps_per_file       = 1
+! taxis_tunit          = 2
+! mode                 = 1  ! 1: forecast mode (relative t-axis), 2: climate mode (absolute t-axis)
+! include_last         = .false.
+! output_filename      = 'igfff'                      ! file name base
+! filename_format      = '<output_filename><ddhhmmss>c'
+! stream_partitions_ml = 1
+! pe_placement_ml      = 1
+! ml_varlist           = 'HHL', 'HSURF', 'FR_LAND', '-grid:VLAT', '-grid:VLON'
+! output_grid          = .true.
+!/
+!&output_nml
+! ! ----------------------------------------------------------- !
+! ! ---  IGLO: ensemble forecast - native grid (00+12 UTC)  --- !
+! ! ---        + temp, synop, ..                            --- !
+! ! ----------------------------------------------------------- !
+! filetype             = 2         ! output format: 2=GRIB2, 4=NETCDFv2
+! dom                  = 1                         ! write global domains
+! remap                = 0                         ! icon grid
+! output_time_unit     = 1                         ! 1: seconds
+! output_bounds        = 0.,259200.,21600., 302400.,648000.,43200.   ! 0h,72h,6h, 84h,180h,12h
+! steps_per_file       = 1
+! taxis_tunit          = 2
+! mode                 = 1  ! 1: forecast mode (relative t-axis), 2: climate mode (absolute t-axis)
+! include_last         = .true.
+! output_filename      = 'igfff'                      ! file name base
+! filename_format      = '<output_filename><ddhhmmss><levtype>v01'
+! stream_partitions_ml = 1
+! pe_placement_ml      = 1
+! ml_varlist           = 'U',         'V',         'T',         'W',
+!                        'T_G',       'H_ICE',     'FR_ICE',    'RELHUM_2M',
+!                        'T_SNOW',    'H_SNOW',    'FRESHSNW',  'PS',
+!                        'T_SO',      'W_SO'
+! stream_partitions_pl = 1
+! pe_placement_pl      = 0
+! pl_varlist           = 'FI', 'T', 'U', 'V', 'RELHUM'
+! p_levels             =    100,   200,            500,           1000,           3000,
+!                          5000,  7000,  10000,  20000,  25000,  30000,  50000,  70000,
+!                         85000, 92500, 100000
+! output_grid          = .false.
+!/
+!&output_nml
+! ! ----------------------------------------------------------- !
+! ! ---  IGLO: ensemble forecast - native grid (00+12 UTC)  --- !
+! ! ---        + feedback files                             --- !
+! ! ----------------------------------------------------------- !
+! filetype             = 2         ! output format: 2=GRIB2, 4=NETCDFv2
+! dom                  = 1                         ! write global domains
+! remap                = 0                         ! icon grid
+! output_time_unit     = 1                         ! 1: seconds
+! output_bounds        = 0.,648000.,21600.,        ! 0h,180h,6h,
+! steps_per_file       = 1
+! taxis_tunit          = 2
+! mode                 = 1  ! 1: forecast mode (relative t-axis), 2: climate mode (absolute t-axis)
+! include_last         = .true.
+! output_filename      = 'igfff'                      ! file name base
+! filename_format      = '<output_filename><ddhhmmss>v02'
+! stream_partitions_ml = 1
+! pe_placement_ml      = 1
+! ml_varlist           = 'P',
+!                        'CLCT',      'CLCH',      'CLCM',      'CLCL',
+!                        'PMSL',      'T_2M',      'TD_2M',     'TMIN_2M',
+!                        'TMAX_2M',   'U_10M',     'V_10M',     'TOT_PREC',
+!                        'CLCT_MOD',  'Z0'
+!                        'ASOB_S',    'ASWDIFD_S', 'ASWDIFU_S', 'ASWDIR_S'
+! output_grid          = .false.
+!/
+!&output_nml
+! ! ----------------------------------------------------------- !
+! ! ---  IGLO: ensemble forecast - native grid (00+12 UTC)  --- !
+! ! ---        p-levels hours 78, 90, 102, ...              --- !
+! ! ----------------------------------------------------------- !
+! filetype             = 2         ! output format: 2=GRIB2, 4=NETCDFv2
+! dom                  = 1                         ! write global domains
+! remap                = 0                         ! icon grid
+! output_time_unit     = 1                         ! 1: seconds
+! output_bounds        = 280800.,626400.,43200.,   ! 78 h,174h,12h,
+! steps_per_file       = 1
+! taxis_tunit          = 2
+! mode                 = 1  ! 1: forecast mode (relative t-axis), 2: climate mode (absolute t-axis)
+! include_last         = .false.
+! output_filename      = 'igfff'                      ! file name base
+! filename_format      = '<output_filename><ddhhmmss><levtype>V01'
+! stream_partitions_pl = 1
+! pe_placement_pl      = 1
+! pl_varlist           = 'FI',   'T',
+! p_levels             =   50000, 85000
+! output_grid          = .false.
+!/
+!&output_nml
+! ! -------------------------------------------- !
+! ! ---  IGLO: output fields - regular grid  --- !
+! ! -------------------------------------------- !
+! filetype             = 2        ! output format: 2=GRIB2, 4=NETCDFv2
+! dom                  = 1
+! remap                = 1                        ! reg. lat-lon
+! output_time_unit     = 1                        ! 1: seconds
+! output_bounds        = 0., 108000.,10800., 129600., 10000000., 21600.          ! start, end, increment
+! steps_per_file       = 1
+! taxis_tunit          = 2
+! mode                 = 1  ! 1: forecast mode (relative t-axis), 2: climate mode (absolute t-axis)
+! include_last         = .true.
+! output_filename      = 'igfrf'                      ! file name base
+! filename_format      = '<output_filename><ddhhmmss><levtype>'
+! stream_partitions_ml = 1
+! pe_placement_ml      = 0
+! stream_partitions_pl = 1
+! pe_placement_pl      = 0
+! ml_varlist           = 'ALB_RAD', 'ALHFL_S', 'APAB_S', 'ASHFL_S', 'ASOB_S',
+!                        'ASOB_T', 'ASWDIFD_S', 'ASWDIFU_S', 'ASWDIR_S', 'ATHB_S',
+!                        'ATHB_T', 'AUMFL_S', 'AVMFL_S', 'CAPE_ML', 'CIN_ML',
+!                        'CLC', 'CLCH', 'CLCL', 'CLCM', 'CLCT', 'CLCT_MOD',
+!                        'CLDEPTH', 'FR_ICE', 'HBAS_CON', 'HTOP_CON', 'HTOP_DC',
+!                        'HZEROCL', 'H_ICE', 'H_SNOW', 'P', 'PMSL', 'PS',
+!                        'QC', 'QI', 'QV', 'QV_2M', 'QV_S', 'RAIN_CON', 'RAIN_GSP',
+!                        'RELHUM_2M', 'RHO_SNOW', 'RUNOFF_G', 'RUNOFF_S',
+!                        'SNOW_CON', 'SNOW_GSP', 'SOBS_RAD', 'T', 'TCH', 'TCM',
+!                        'TD_2M', 'THBS_RAD', 'TKE', 'TMAX_2M', 'TMIN_2M',
+!                        'TOT_PREC', 'TQC', 'TQC_DIA', 'TQI', 'TQI_DIA', 'TQR',
+!                        'TQS', 'TQV', 'T_2M', 'T_G', 'T_ICE', 'T_SNOW', 'T_SO',
+!                        'U', 'V', 'W', 'WW', 'W_SNOW', 'W_SO', 'W_SO_ICE',
+!                        'Z0',
+! m_levels             = '25...(nlev+1)',
+! pl_varlist           = 'FI', 'T', 'U', 'V', 'RELHUM', 'OMEGA', 'CLC', 'W'
+! p_levels             =   500,  1000,  3000,  5000,  7000, 10000, 12500, 15000,
+!                        17500, 20000, 22500, 25000, 27500, 30000, 35000, 40000,
+!                        45000, 50000, 55000, 60000, 65000, 70000, 75000, 77500,
+!                        80000, 82500, 85000, 87500, 90000, 92500, 95000, 97500,
+!                        100000
+! reg_lon_def          = 0.,0.5,359.501
+! reg_lat_def          = -90.,0.5,90.
+! output_grid          = .false.
+!/
+!&output_nml
+! ! -------------------------------------------------------------- !
+! ! ---  ICON:    ensemble forecast - native grid (00+12 UTC)  --- !
+! ! ---           VMAX_10M every hour                          --- !
+! ! -------------------------------------------------------------- !
+! filetype             = 2         ! output format: 2=GRIB2, 4=NETCDFv2
+! dom                  = 1                         ! write global domains
+! remap                = 0                         ! icon grid
+! output_time_unit     = 1                         ! 1: seconds
+! output_bounds        = 3600.,648000.,3600.,      ! 1h,180h,1h,
+! steps_per_file       = 1
+! taxis_tunit          = 2
+! mode                 = 1  ! 1: forecast mode (relative t-axis), 2: climate mode (absolute t-axis)
+! include_last         = .true.
+! output_filename      = 'igfff'                      ! file name base
+! filename_format      = '<output_filename><ddhhmmss>vmx'
+! stream_partitions_ml = 1
+! pe_placement_ml      = 0
+! ml_varlist           = 'VMAX_10M',
+! output_grid          = .false.
+!/
+!&output_nml
+! ! ---------------------------------------------------------------- !
+! ! ---  ICON-EU: constant output fields - native grid at VV=0  --- !
+! ! --------------------------------------------------------------- !
+! filetype             = 2         ! output format: 2=GRIB2, 4=NETCDFv2
+! dom                  = 2                         ! write EU nest
+! remap                = 0                         ! icon grid
+! output_time_unit     = 1                         ! 1: seconds
+! output_bounds        = 0., 0., 9999.             ! start, end, increment
+! steps_per_file       = 1
+! taxis_tunit          = 2
+! mode                 = 1  ! 1: forecast mode (relative t-axis), 2: climate mode (absolute t-axis)
+! include_last         = .false.
+! output_filename      = 'iefff'                      ! file name base
+! filename_format      = '<output_filename><ddhhmmss>c'
+! stream_partitions_ml = 1
+! pe_placement_ml      = 1
+! ml_varlist           = 'HHL', 'HSURF', 'FR_LAND', '-grid:VLAT', '-grid:VLON'
+! output_grid          = .true.
+!/
+!&output_nml
+! ! -------------------------------------------------------------------------- !
+! ! ---  ICON-EU: fields used by interpolation I2L (ICON-EU -> LMK), vv=0  --- !
+! ! -------------------------------------------------------------------------- !
+! filetype             = 2         ! output format: 2=GRIB2, 4=NETCDFv2
+! dom                  = 2                         ! write EU nest
+! remap                = 0                         ! icon grid
+! output_time_unit     = 1                         ! 1: seconds
+! output_bounds        = 0., 10800., 10800.        ! vv=0h, vv=3h (due to 3h difference for IE2L)
+! steps_per_file       = 1
+! taxis_tunit          = 2
+! mode                 = 1  ! 1: forecast mode (relative t-axis), 2: climate mode (absolute t-axis)
+! include_last         = .false.
+! output_filename      = 'iefff'                      ! file name base
+! filename_format      = '<output_filename><ddhhmmss><levtype>'
+! stream_partitions_ml = 1
+! pe_placement_ml      = 1
+! ml_varlist           = 'QV',        'QC',        'QI',        'QR',        'QS',
+!                        'U',         'V',         'T',         'P',
+!                        'W',
+!                        'T_SO',
+!                        'W_SO',
+!                        'T_SNOW',    'W_SNOW',    'QV_S',      'T_G',
+!                        'W_I',       'FRESHSNW',  'T_ICE',     'H_ICE',
+! output_grid          = .false.
+!/
+!&output_nml
+! ! --------------------------------------------------------------------- !
+! ! ---  ICON-EU: fields used by interpolation I2L (ICON-EU -> LMK),  --- !
+! ! ---           vv=1h,hstop_i2l,1h, hstop_i2l_next6,120h,6h         --- !
+! ! --------------------------------------------------------------------- !
+! filetype             = 2         ! output format: 2=GRIB2, 4=NETCDFv2
+! dom                  = 2                         ! write EU nest
+! remap                = 0                         ! icon grid
+! output_time_unit     = 1                         ! 1: seconds
+! output_bounds        = 3600.,7200.,3600., 14400.,118800.,3600., 129600.,432000.,21600. ! vv=4h ..
+! steps_per_file       = 1
+! taxis_tunit          = 2
+! mode                 = 1  ! 1: forecast mode (relative t-axis), 2: climate mode (absolute t-axis)
+! include_last         = .true.
+! output_filename      = 'iefff'                      ! file name base
+! filename_format      = '<output_filename><ddhhmmss><levtype>'
+! stream_partitions_ml = 1
+! pe_placement_ml      = 0
+! ml_varlist           = 'QV',        'QC',        'QI',        'QR',        'QS',
+!                        'U',         'V',         'T',         'P',
+!                        'T_SO',
+!                        'T_SNOW',    'W_SNOW',    'QV_S',      'T_G',
+! output_grid          = .false.
+!/
+!&output_nml
+! ! -------------------------------------------------------------------- !
+! ! ---  ICON-EU: ensemble forecast - native grid, vv=0 (00+12 UTC)  --- !
+! ! ---           + temp, synop, .. (all but i2l)                    --- !
+! ! -------------------------------------------------------------------- !
+! filetype             = 2         ! output format: 2=GRIB2, 4=NETCDFv2
+! dom                  = 2                         ! write global domains
+! remap                = 0                         ! icon grid
+! output_time_unit     = 1                         ! 1: seconds
+! output_bounds        = 0.,0.,9999.               ! vv=0
+! steps_per_file       = 1
+! taxis_tunit          = 2
+! mode                 = 1  ! 1: forecast mode (relative t-axis), 2: climate mode (absolute t-axis)
+! include_last         = .false.
+! output_filename      = 'iefff'                      ! file name base
+! filename_format      = '<output_filename><ddhhmmss><levtype>v00'
+! stream_partitions_ml = 1
+! pe_placement_ml      = 0
+! ml_varlist           = 'TKE',
+!                        'CLCT', 'CLCH', 'CLCM', 'CLCL',
+!                        'PMSL', 'PS',
+!                        'T_2M',     'TD_2M',    'RELHUM_2M', 'U_10M', 'V_10M',
+!                        'FR_ICE',  'H_SNOW',
+!                        'CAPE_CON', 'TQV', 'TQC', 'TQI'
+!                        'TMIN_2M',   'TMAX_2M',
+!!!                      'H_ICE',     'FR_ICE',  'H_SNOW', 'W_SNOW', 'FRESHSNW',
+! stream_partitions_pl = 1
+! pe_placement_pl      = 1
+! pl_varlist           = 'T',         'U',         'V',
+! p_levels             =  50000, 85000
+! output_grid          = .false.
+!/
+!&output_nml
+! ! -------------------------------------------------------------- !
+! ! ---  ICON-EU: ensemble forecast - native grid (00+12 UTC)  --- !
+! ! ---           + temp, synop, .. (all but i2l)              --- !
+! ! -------------------------------------------------------------- !
+! filetype             = 2         ! output format: 2=GRIB2, 4=NETCDFv2
+! dom                  = 2                         ! write global domains
+! remap                = 0                         ! icon grid
+! output_time_unit     = 1                         ! 1: seconds
+! output_bounds        = 21600., 432000., 21600.   ! vv=6h,120h,6h
+! steps_per_file       = 1
+! taxis_tunit          = 2
+! mode                 = 1  ! 1: forecast mode (relative t-axis), 2: climate mode (absolute t-axis)
+! include_last         = .true.
+! output_filename      = 'iefff'                      ! file name base
+! filename_format      = '<output_filename><ddhhmmss><levtype>v01'
+! stream_partitions_ml = 1
+! pe_placement_ml      = 1
+! ml_varlist           = 'W_SO',         'T',
+!                        'ASWDIFD_S','ASWDIR_S', 'CLCT', 'CLCH', 'CLCM', 'CLCL',
+!                        'PMSL', 'PS',
+!                        'TOT_PREC', 'RAIN_CON', 'RAIN_GSP',  'SNOW_CON', 'SNOW_GSP',
+!                        'T_2M',     'TD_2M',    'RELHUM_2M', 'U_10M', 'V_10M',
+!                        'H_ICE',     'FR_ICE',  'H_SNOW', 'FRESHSNW',
+!                        'CAPE_CON', 'TQV', 'TQC_DIA', 'TQI_DIA',
+!                        'TMIN_2M',   'TMAX_2M', 'T_G', 'ATHB_S',  'ATHB_T',
+!                        'ASOB_S',  'ASOB_T',  'ASWDIFD_S', 'ASWDIFU_S', 'ASWDIR_S'
+! stream_partitions_pl = 1
+! pe_placement_pl      = 1
+! pl_varlist           = 'T',         'U',         'V',
+! p_levels             =  50000, 85000
+! output_grid          = .false.
+!/
+!&output_nml
+! ! -------------------------------------------------------------- !
+! ! ---  ICON-EU: ensemble forecast - native grid (00+12 UTC)  --- !
+! ! ---           + T_2M, TD_2M, ..                            --- !
+! ! ---           + request from SMA (00UTC too, 0h,24h,3h)    --- !
+! ! -------------------------------------------------------------- !
+! filetype             = 2         ! output format: 2=GRIB2, 4=NETCDFv2
+! dom                  = 2                         ! write global domains
+! remap                = 0                         ! icon grid
+! output_time_unit     = 1                         ! 1: seconds
+!!output_bounds        = 0.,86400.,10800., 108000.,432000.,21600.  ! 0h,24h,3h 30h,120h,6h
+! output_bounds        = 10800.,75600.,21600.                      ! 3h,21h,6h
+! steps_per_file       = 1
+! taxis_tunit          = 2
+! mode                 = 1  ! 1: forecast mode (relative t-axis), 2: climate mode (absolute t-axis)
+! include_last         = .true.
+! output_filename      = 'iefff'                      ! file name base
+! filename_format      = '<output_filename><ddhhmmss>v03'
+! stream_partitions_ml = 1
+! pe_placement_ml      = 1
+! ml_varlist           = 'T_2M',      'TD_2M',
+! output_grid          = .false.
+!/
+!&output_nml
+! ! -------------------------------------------------------------- !
+! ! ---  ICON-EU: ensemble forecast - native grid (00+12 UTC)  --- !
+! ! ---           VMAX_10M every hour                          --- !
+! ! -------------------------------------------------------------- !
+! filetype             = 2         ! output format: 2=GRIB2, 4=NETCDFv2
+! dom                  = 2                         ! write global domains
+! remap                = 0                         ! icon grid
+! output_time_unit     = 1                         ! 1: seconds
+! output_bounds        = 3600.,432000.,3600.          ! 0h,120h,6h
+! steps_per_file       = 1
+! taxis_tunit          = 2
+! mode                 = 1  ! 1: forecast mode (relative t-axis), 2: climate mode (absolute t-axis)
+! include_last         = .true.
+! output_filename      = 'iefff'                      ! file name base
+! filename_format      = '<output_filename><ddhhmmss>vmx'
+! stream_partitions_ml = 1
+! pe_placement_ml      = 0
+! ml_varlist           = 'VMAX_10M',
+! output_grid          = .false.
+!/
+!&output_nml
+! ! -------------------------------------------------------------- !
+! ! ---      !!! NON-OPERATIONAL - JUST FOR BUILDBOT !!!       --- !
+! ! ---  ICON-EU: ensemble forecast - native grid (00+12 UTC)  --- !
+! ! ---       test computation of optional diagnostics         --- !
+! ! ---                  lpi_con & lfd_con                     --- !
+! ! -------------------------------------------------------------- !
+! filetype             = 2         ! output format: 2=GRIB2, 4=NETCDFv2
+! dom                  = 2                         ! write global domains
+! remap                = 0                         ! icon grid
+! output_time_unit     = 1                         ! 1: seconds
+! output_bounds        = 21600., 432000., 21600.   ! vv=6h,120h,6h
+! steps_per_file       = 1
+! taxis_tunit          = 2
+! mode                 = 1  ! 1: forecast mode (relative t-axis), 2: climate mode (absolute t-axis)
+! include_last         = .true.
+! output_filename      = 'iefff'                      ! file name base
+! filename_format      = '<output_filename><ddhhmmss><levtype>lpi_lfd_con'
+! stream_partitions_ml = 1
+! pe_placement_ml      = 0
+! ml_varlist           = 'LPI_CON_MAX', 'LFD_CON'
+! output_grid          = .false.
+!/
+EOF_NML2
+
+echo "LOCATION: map_file.ana"
+cat > map_file.ana <<EOF_NML3
+# internal name     GRIB2 shortName
+theta_v             THETA_V
+rho                 DEN
+vn                  VN
+u                   U
+v                   V
+w                   W
+tke                 TKE
+temp                T
+pres                P
+qv                  QV
+qc                  QC
+qi                  QI
+qr                  QR
+qs                  QS
+t_g                 T_G
+qv_s                QV_S
+fr_seaice           FR_ICE
+alb_si              ALB_SEAICE
+t_ice               T_ICE
+h_ice               H_ICE
+t_snow              T_SNOW
+freshsnow           FRESHSNW
+snowfrac_lc         SNOWC
+w_snow              W_SNOW
+rho_snow            RHO_SNOW
+h_snow              H_SNOW
+w_i                 W_I
+w_so                W_SO
+w_so_ice            W_SO_ICE
+t_so                T_SO
+smi                 SMI
+gz0                 Z0
+pres_sfc            PS
+z_ifc               HHL
+
+t_mnw_lk            T_MNW_LK
+t_wml_lk            T_WML_LK
+h_ml_lk             H_ML_LK
+t_bot_lk            T_BOT_LK
+c_t_lk              C_T_LK
+t_b1_lk             T_B1_LK
+h_b1_lk             H_B1_LK
+EOF_NML3
+
+echo "LOCATION: map_file.fc"
+cat > map_file.fc <<EOF_NML4
+# GRIB2 shortName   internal name
+alb_rad           ALBDIF
+alb_seaice        ALB_SI
+apab_s            ASWFLX_PAR_SFC
+aswdifd_s         ASODIFD_S
+aswdifu_s         ASODIFU_S
+aswdir_s          ASODIRD_S
+cape_con          CAPE
+den               RHO
+dtke_con          DDT_TKE_PCONV
+dtke_hsh          DDT_TKE_HSH
+fi                GEOPOT
+fr_ice            FR_SEAICE
+freshsnw          FRESHSNOW
+hhl               Z_IFC
+hsurf             TOPOGRAPHY_C
+p                 PRES
+pmsl              PRES_MSL
+ps                PRES_SFC
+relhum            RH
+relhum_2m         RH_2M
+snowc             SNOWFRAC_LC
+sobs_rad          SOB_S
+t                 TEMP
+t_sea             T_SEASFC
+thbs_rad          THB_S
+vmax_10m          GUST10
+z0                GZ0
+EOF_NML4
+
+
+
+# ----------------------------------------------------------------------
+# run the model!
+# ----------------------------------------------------------------------
+
+echo "START MODEL"
+start_time=$(date +%s.%3N)
+                ]]>
+            </parameter>
+            <parameter name="executable">/path/to/icon-2.6.6/bin/icon-plain</parameter>
+            <parameter name="postprocess" separator="">
+                <![CDATA[
+end_time=$(date +%s.%3N)
+elapsed=$(echo "scale=3; $end_time - $start_time" | bc)
+echo "Total time: $elapsed s"
+cp /path/to/icon-2.6.6/experiments/ICON_R2B7N7.$SLURM_JOB_ID/report.csv /path/to/results/${taskspernode}_ranks_${threadspertask}_threads_${cpufreq}_hz_${iconsteps}_steps.csv
+
+exit $?
+                ]]>
+            </parameter>
+          </parameterset>
+
+        <parameterset name="eset" init_with="platform.xml:executeset">
+            <parameter name="starter">srun</parameter>
+            <parameter name="args_starter">$FLAGS_MPI_BATCH env LD_PRELOAD=/path/to/ee-cpt/libEECPT.impi.so OMP_TOOL_LIBRARIES=/path/to/ee-cpt/libEECPT.impi.so</parameter>
+        </parameterset>
+
+        <step name="run" iterations="1">
+            <use>eset</use>
+            <use>system_pset</use>
+            <use from="platform.xml">executesub</use>
+            <use from="platform.xml">jobfiles</use>
+            <do done_file="${done_file}">${submit} submit.job</do>
+        </step>
+
+        <patternset name="slurm">
+            <pattern name="slurm_job_id">Submitted\s*batch\s*job\s*${jube_pat_int}</pattern>
+        </patternset>
+
+        <patternset name="icon_r2b7n7">
+            <pattern name="tpe" type="float">Time\s*Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tlb" type="float">Time\s*Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tce" type="float">Time\s*Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tse" type="float">Time\s*Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tte" type="float">Time\s*Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tmpe" type="float">Time\s*MPI Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tmlb" type="float">Time\s*MPI Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tmce" type="float">Time\s*MPI Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tmse" type="float">Time\s*MPI Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tmte" type="float">Time\s*MPI Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tope" type="float">Time\s*OMP Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tolb" type="float">Time\s*OMP Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="toce" type="float">Time\s*OMP Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tose" type="float">Time\s*OMP Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tote" type="float">Time\s*OMP Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="epe" type="float">Energy\s*Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="elb" type="float">Energy\s*Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="ece" type="float">Energy\s*Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="ese" type="float">Energy\s*Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="ete" type="float">Energy\s*Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="empe" type="float">Energy\s*MPI Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="emlb" type="float">Energy\s*MPI Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="emce" type="float">Energy\s*MPI Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="emse" type="float">Energy\s*MPI Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="emte" type="float">Energy\s*MPI Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="eope" type="float">Energy\s*OMP Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="eolb" type="float">Energy\s*OMP Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="eoce" type="float">Energy\s*OMP Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="eose" type="float">Energy\s*OMP Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="eote" type="float">Energy\s*OMP Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="total_time" type="float">Total time:\s*${jube_pat_fp}\s*s</pattern>
+        </patternset>
+
+        <analyser name="icon_analyser" reduce="true">
+            <analyse step="run">
+                <file use="slurm">stdout</file>
+                <file use="icon_r2b7n7">job.out</file>
+            </analyse>
+        </analyser>
+
+        <result>
+            <use>icon_analyser</use>
+
+            <table name="icon_pretty" sort="taskspernode,threadspertask" style="pretty">
+                <column>nodes</column>
+                <column>taskspernode</column>
+                <column>threadspertask</column>
+                <column>iconsteps</column>
+                <column>cpufreq</column>
+                <column>slurm_job_id</column>
+                <column title="cnt">total_time_cnt</column>
+                <column title="tpe" format=".3f">tpe</column>
+                <column title="tmpe" format=".3f">tmpe</column>
+                <column title="tope" format=".3f">tope</column>
+                <column title="epe" format=".3f">epe</column>
+                <column title="empe" format=".3f">empe</column>
+                <column title="eope" format=".3f">eope</column>
+                <column title="total_time" format=".3f">total_time</column>
+            </table>
+
+            <table name="icon_csv" sort="taskspernode,threadspertask" style="csv">
+                <column>nodes</column>
+                <column>taskspernode</column>
+                <column>threadspertask</column>
+                <column>iconsteps</column>
+                <column>cpufreq</column>
+                <column>slurm_job_id</column>
+                <column title="cnt">total_time_cnt</column>
+                <column title="tpe" format=".3f">tpe</column>
+                <column title="tlb" format=".3f">tlb</column>
+                <column title="tce" format=".3f">tce</column>
+                <column title="tse" format=".3f">tse</column>
+                <column title="tte" format=".3f">tte</column>
+                <column title="tmpe" format=".3f">tmpe</column>
+                <column title="tmlb" format=".3f">tmlb</column>
+                <column title="tmce" format=".3f">tmce</column>
+                <column title="tmse" format=".3f">tmse</column>
+                <column title="tmte" format=".3f">tmte</column>
+                <column title="tope" format=".3f">tope</column>
+                <column title="tolb" format=".3f">tolb</column>
+                <column title="toce" format=".3f">toce</column>
+                <column title="tose" format=".3f">tose</column>
+                <column title="tote" format=".3f">tote</column>
+                <column title="epe" format=".3f">epe</column>
+                <column title="elb" format=".3f">elb</column>
+                <column title="ece" format=".3f">ece</column>
+                <column title="ese" format=".3f">ese</column>
+                <column title="ete" format=".3f">ete</column>
+                <column title="empe" format=".3f">empe</column>
+                <column title="emlb" format=".3f">emlb</column>
+                <column title="emce" format=".3f">emce</column>
+                <column title="emse" format=".3f">emse</column>
+                <column title="emte" format=".3f">emte</column>
+                <column title="eope" format=".3f">eope</column>
+                <column title="eolb" format=".3f">eolb</column>
+                <column title="eoce" format=".3f">eoce</column>
+                <column title="eose" format=".3f">eose</column>
+                <column title="eote" format=".3f">eote</column>
+                <column title="total_time" format=".3f">total_time</column>
+            </table>
+        </result>
+
+    </benchmark>
+</jube>

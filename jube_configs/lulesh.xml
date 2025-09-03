@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jube>
+    <benchmark name="LULESH" outpath="jube-runs">
+
+        <parameterset name="system_pset" init_with="platform.xml:systemParameter">
+            <parameter name="jobname">LULESH</parameter>
+            <parameter name="nodes" type="int">1</parameter>
+            <parameter name="taskspernode" type="int">1,8,27,64</parameter>
+            <parameter name="threadspertask" mode="python" type="int">int(96//$taskspernode)</parameter>
+            <parameter name="additional_job_config">#SBATCH --exclusive</parameter>
+            <parameter name="timelimit">02:00:00</parameter>
+<!--            <parameter name="timelimit" mode="python" type="str">-->
+<!--                base_hours = 2-->
+<!--                hours = base_hours * int($steps)-->
+<!--                # cap maximum at 48 hours-->
+<!--                hours = min(hours, 48)-->
+<!--                "{:02d}:00:00".format(hours)-->
+<!--            </parameter>-->
+            <parameter name="additional_job_config">#SBATCH --hwc=likwid</parameter>
+            <parameter name="queue">c23ms</parameter>
+            <parameter name="steps" type="int">1,5,10,20</parameter>
+            <parameter name="cpufreq" type="int">1000000,1500000,2000000,2500000,3000000,3500000,3800000</parameter>
+            <parameter name="additional_job_config">#SBATCH --cpu-freq=$cpufreq-$cpufreq:performance</parameter>
+
+            <parameter name="preprocess" separator="">
+                <![CDATA[
+module purge
+module load iimpi/2022a
+module load netCDF
+module load netCDF-Fortran
+module load HDF5/1.12.2
+module load imkl/2022.1.0
+module load CMake
+module load binutils
+module load likwid/5.4
+module load hwloc
+
+export LIKWID_ROOT=/cvmfs/software.hpc.rwth.de/Linux/RH9/x86_64/intel/sapphirerapids/software/likwid/5.4.1-GCCcore-11.3.0
+
+echo "START MODEL"
+start_time=$(date +%s.%3N)
+                ]]>
+            </parameter>
+            <parameter name="executable">/path/to/LULESH/build/lulesh2.0 -s $steps</parameter>
+            <parameter name="postprocess" separator="">
+                <![CDATA[
+end_time=$(date +%s.%3N)
+elapsed=$(echo "scale=3; $end_time - $start_time" | bc)
+echo "Total time: $elapsed s"
+
+exit $?
+                ]]>
+            </parameter>
+          </parameterset>
+
+        <parameterset name="eset" init_with="platform.xml:executeset">
+            <parameter name="starter">srun</parameter>
+            <parameter name="args_starter">$FLAGS_MPI_BATCH env LD_PRELOAD=/path/to/ee-cpt/libEECPT.impi.so OMP_TOOL_LIBRARIES=/path/to/ee-cpt/libEECPT.impi.so</parameter>
+        </parameterset>
+
+        <step name="run" iterations="1">
+            <use>eset</use>
+            <use>system_pset</use>
+            <use from="platform.xml">executesub</use>
+            <use from="platform.xml">jobfiles</use>
+            <do done_file="${done_file}">${submit} submit.job</do>
+        </step>
+
+        <patternset name="slurm">
+            <pattern name="slurm_job_id">Submitted\s*batch\s*job\s*${jube_pat_int}</pattern>
+        </patternset>
+
+        <patternset name="lulesh">
+            <pattern name="tpe" type="float">Time\s*Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tlb" type="float">Time\s*Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tce" type="float">Time\s*Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tse" type="float">Time\s*Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tte" type="float">Time\s*Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tmpe" type="float">Time\s*MPI Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tmlb" type="float">Time\s*MPI Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tmce" type="float">Time\s*MPI Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tmse" type="float">Time\s*MPI Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tmte" type="float">Time\s*MPI Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tope" type="float">Time\s*OMP Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tolb" type="float">Time\s*OMP Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="toce" type="float">Time\s*OMP Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tose" type="float">Time\s*OMP Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tote" type="float">Time\s*OMP Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="epe" type="float">Energy\s*Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="elb" type="float">Energy\s*Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="ece" type="float">Energy\s*Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="ese" type="float">Energy\s*Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="ete" type="float">Energy\s*Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="empe" type="float">Energy\s*MPI Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="emlb" type="float">Energy\s*MPI Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="emce" type="float">Energy\s*MPI Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="emse" type="float">Energy\s*MPI Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="emte" type="float">Energy\s*MPI Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="eope" type="float">Energy\s*OMP Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="eolb" type="float">Energy\s*OMP Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="eoce" type="float">Energy\s*OMP Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="eose" type="float">Energy\s*OMP Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="eote" type="float">Energy\s*OMP Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="total_time" type="float">Total time:\s*${jube_pat_fp}\s*s</pattern>
+        </patternset>
+
+        <analyser name="lulesh_analyser" reduce="true">
+            <analyse step="run">
+                <file use="slurm">stdout</file>
+                <file use="lulesh">job.out</file>
+            </analyse>
+        </analyser>
+
+        <result>
+            <use>lulesh_analyser</use>
+
+            <table name="lulesh_pretty" sort="taskspernode,threadspertask" style="pretty">
+                <column>nodes</column>
+                <column>taskspernode</column>
+                <column>threadspertask</column>
+                <column>steps</column>
+                <column>cpufreq</column>
+                <column>slurm_job_id</column>
+                <column title="cnt">total_time_cnt</column>
+                <column title="tpe" format=".3f">tpe</column>
+                <column title="tmpe" format=".3f">tmpe</column>
+                <column title="tope" format=".3f">tope</column>
+                <column title="epe" format=".3f">epe</column>
+                <column title="empe" format=".3f">empe</column>
+                <column title="eope" format=".3f">eope</column>
+                <column title="total_time" format=".3f">total_time</column>
+            </table>
+
+            <table name="lulesh_csv" sort="taskspernode,threadspertask" style="csv">
+                <column>nodes</column>
+                <column>taskspernode</column>
+                <column>threadspertask</column>
+                <column>steps</column>
+                <column>cpufreq</column>
+                <column>slurm_job_id</column>
+                <column title="cnt">total_time_cnt</column>
+                <column title="tpe" format=".3f">tpe</column>
+                <column title="tlb" format=".3f">tlb</column>
+                <column title="tce" format=".3f">tce</column>
+                <column title="tse" format=".3f">tse</column>
+                <column title="tte" format=".3f">tte</column>
+                <column title="tmpe" format=".3f">tmpe</column>
+                <column title="tmlb" format=".3f">tmlb</column>
+                <column title="tmce" format=".3f">tmce</column>
+                <column title="tmse" format=".3f">tmse</column>
+                <column title="tmte" format=".3f">tmte</column>
+                <column title="tope" format=".3f">tope</column>
+                <column title="tolb" format=".3f">tolb</column>
+                <column title="toce" format=".3f">toce</column>
+                <column title="tose" format=".3f">tose</column>
+                <column title="tote" format=".3f">tote</column>
+                <column title="epe" format=".3f">epe</column>
+                <column title="elb" format=".3f">elb</column>
+                <column title="ece" format=".3f">ece</column>
+                <column title="ese" format=".3f">ese</column>
+                <column title="ete" format=".3f">ete</column>
+                <column title="empe" format=".3f">empe</column>
+                <column title="emlb" format=".3f">emlb</column>
+                <column title="emce" format=".3f">emce</column>
+                <column title="emse" format=".3f">emse</column>
+                <column title="emte" format=".3f">emte</column>
+                <column title="eope" format=".3f">eope</column>
+                <column title="eolb" format=".3f">eolb</column>
+                <column title="eoce" format=".3f">eoce</column>
+                <column title="eose" format=".3f">eose</column>
+                <column title="eote" format=".3f">eote</column>
+                <column title="total_time" format=".3f">total_time</column>
+            </table>
+        </result>
+
+    </benchmark>
+</jube>
