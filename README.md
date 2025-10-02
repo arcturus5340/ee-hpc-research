@@ -1,10 +1,10 @@
 # ee-hpc-research
 
-Exploratory and analytical workflows on ee-hpc generated CSV data for ICON, LULESH, and NPB-MZ-LU.
+Exploratory and analytical workflows on ee-hpc generated CSV data for ICON and LULESH.
 
 ## 🔍 Overview
 
-This repository contains Jupyter notebooks and CSV datasets generated using the ee-hpc library. The focus is on analyzing performance and energy efficiency metrics from high-performance computing (HPC) applications, specifically:
+This repository contains Jupyter notebooks and CSV datasets generated using the ee-cpt library. The focus is on analyzing performance and energy efficiency metrics from high-performance computing (HPC) applications, specifically:
 
 - **ICON**: A global atmospheric model.
 - **LULESH**: A proxy application for unstructured Lagrangian hydrodynamics.
@@ -12,7 +12,7 @@ This repository contains Jupyter notebooks and CSV datasets generated using the 
 
 ## 📂 Repository Structure
 
-- `data/`: Raw CSV datasets generated via ee-hpc.
+- `data/`: Raw CSV datasets generated via ee-cpt.
 - `jube_configs/`: JUBE configuration files.
 - `notebooks/`: Jupyter notebooks for data exploration and analysis.
 - `results/`: Processed outputs and visualizations.
