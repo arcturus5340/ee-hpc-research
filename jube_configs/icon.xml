@@ -961,7 +961,7 @@ echo "START MODEL"
 start_time=$(date +%s.%3N)
                 ]]>
             </parameter>
-            <parameter name="executable">/path/to/icon-2.6.6/bin/icon-plain</parameter>
+            <parameter name="executable">/path/to/icon-2.6.6/bin/icon-otfcpt</parameter>
             <parameter name="postprocess" separator="">
                 <![CDATA[
 end_time=$(date +%s.%3N)
