@@ -1,0 +1,27 @@
+metric, value, unit
+operation, dlio,
+ranks, 48,
+read threads, 0,
+subfiling, NO,
+chunking, NO,
+collective meta, YES,
+collective data, YES,
+train total size, 194.979, GB
+train size per rank, 4.062, GB
+train emulated compute time per epoch, "565.726, 565.445, 566.735, 564.737, 566.348", "s, s, s, s, s"
+train emulated compute time, 2828.991, s
+train metadata time per epoch, "19.877, 18.224, 18.778, 19.241, 18.512", "s, s, s, s, s"
+train metadata time, 94.632, s
+train raw read time per epoch, "16.298, 15.143, 15.028, 15.020, 15.125", "s, s, s, s, s"
+train total raw read time, 76.613, s
+train raw read rate per epoch, "255.224, 274.688, 276.785, 276.935, 275.014", "MB/s, MB/s, MB/s, MB/s, MB/s"
+train avg raw read rate, 271.729, MB/s
+train observed time per epoch, "635.608, 624.886, 625.294, 625.947, 628.732", "s, s, s, s, s"
+train observed time, 3140.467, s
+train observed rate per epoch, "59.522, 69.978, 71.031, 67.955, 66.676", "MB/s, MB/s, MB/s, MB/s, MB/s"
+train avg observed rate, 67.032, MB/s
+train throughput samples per second per epoch, "0.654, 0.666, 0.665, 0.665, 0.662", "samples/s, samples/s, samples/s, samples/s, samples/s"
+train throughput avg samples per second, 0.662, samples/s
+train throughput stdev samples per second, 0.004, samples/s
+train io avg, 6.622, MB/s
+train io stdev, 42.776, KB/s
