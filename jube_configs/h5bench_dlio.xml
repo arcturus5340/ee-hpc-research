@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jube>
+    <benchmark name="DLIO" outpath="jube-runs">
+
+        <parameterset name="system_pset" init_with="platform.xml:systemParameter">
+            <parameter name="jobname">h5bench_dlio</parameter>
+            <parameter name="nodes" type="int">1</parameter>
+           <parameter name="taskspernode" type="int">48,96</parameter>
+            <parameter name="readthreads" type="int">0</parameter>
+            <parameter name="additional_job_config">#SBATCH --exclusive</parameter>
+            <parameter name="timelimit">01:25:00</parameter>
+            <parameter name="additional_job_config">#SBATCH --hwc=likwid</parameter>
+            <parameter name="additional_job_config">#export I_MPI_SPAWN=on</parameter>
+            <parameter name="queue">c23ms</parameter>
+           <parameter name="cpufreq" type="int">1000000,1500000,2000000,2500000,3000000,3500000,3800000</parameter>
+            <parameter name="additional_job_config">#SBATCH --cpu-freq=$cpufreq-$cpufreq:performance</parameter>
+
+            <parameter name="preprocess" separator="">
+                <![CDATA[
+# put the right modules
+module purge
+module load iimpi/2022a
+module load netCDF
+module load netCDF-Fortran
+module load HDF5/1.12.2
+module load imkl/2022.1.0
+module load CMake
+module load binutils
+module load likwid/5.4
+module load hwloc
+
+export LIKWID_ROOT=/cvmfs/software.hpc.rwth.de/Linux/RH9/x86_64/intel/sapphirerapids/software/likwid/5.4.1-GCCcore-11.3.0
+export HDF5_HOME=/path/to/hdf5/install
+export LD_LIBRARY_PATH=/path/to/hdf5/install/lib:$LD_LIBRARY_PATH
+
+ln -s /path/to/h5bench/data/ .
+
+echo "START BENCHMARK"
+start_time=$(date +%s.%3N)
+                ]]>
+            </parameter>
+            <parameter name="executable">/path/to/h5bench/dlio/h5bench_dlio --train --keep-files --shuffle --seed-change-epoch  --record-length 10485760 --num-files-train 2000  --num-files-eval 1  --num-samples-per-file 10  --data-folder ./data  --file-prefix img  --batch-size 1 --batch-size-eval 1  --read-threads 0  --preprocess-time 0.0  --preprocess-time-stdev 0.0  --epochs 5  --computation-time 1.3604  --computation-time-stdev 0.05  --random-seed 42  --eval-time 0.5  --eval-time-stdev 0.0  --epochs-between-evals 1  --train-data-folder train  --valid-data-folder valid  --records-dataset-name records  --labels-dataset-name labels  --collective-meta  --collective-data</parameter>
+            <parameter name="postprocess" separator="">
+                <![CDATA[
+end_time=$(date +%s.%3N)
+elapsed=$(echo "scale=3; $end_time - $start_time" | bc)
+echo "Total time: $elapsed s"
+
+exit $?
+                ]]>
+            </parameter>
+          </parameterset>
+
+        <parameterset name="eset" init_with="platform.xml:executeset">
+            <parameter name="starter">srun</parameter>
+            <parameter name="args_starter">$FLAGS_MPI_BATCH env LD_PRELOAD=/path/to/hdf5/install/lib/libhdf5.so.311:/path/to/ee-cpt/libEECPT.impi.so OMP_TOOL_LIBRARIES=/path/to/ee-cpt/libEECPT.impi.so</parameter>
+        </parameterset>
+
+        <step name="run" iterations="1">
+            <use>eset</use>
+            <use>system_pset</use>
+            <use from="platform.xml">executesub</use>
+            <use from="platform.xml">jobfiles</use>
+            <do done_file="${done_file}">${submit} submit.job</do>
+        </step>
+
+        <patternset name="slurm">
+            <pattern name="slurm_job_id">Submitted\s*batch\s*job\s*${jube_pat_int}</pattern>
+        </patternset>
+
+        <patternset name="dlio">
+            <pattern name="tpe" type="float">Time\s*Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tlb" type="float">Time\s*Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tce" type="float">Time\s*Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tse" type="float">Time\s*Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tte" type="float">Time\s*Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tmpe" type="float">Time\s*MPI Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tmlb" type="float">Time\s*MPI Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tmce" type="float">Time\s*MPI Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tmse" type="float">Time\s*MPI Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tmte" type="float">Time\s*MPI Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tope" type="float">Time\s*OMP Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tolb" type="float">Time\s*OMP Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="toce" type="float">Time\s*OMP Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tose" type="float">Time\s*OMP Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="tote" type="float">Time\s*OMP Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="epe0" type="float">0 Energy\s*Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="elb0" type="float">0 Energy\s*Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="ece0" type="float">0 Energy\s*Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="ese0" type="float">0 Energy\s*Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="ete0" type="float">0 Energy\s*Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="empe0" type="float">0 Energy\s*MPI Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="emlb0" type="float">0 Energy\s*MPI Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="emce0" type="float">0 Energy\s*MPI Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="emse0" type="float">0 Energy\s*MPI Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="emte0" type="float">0 Energy\s*MPI Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="eope0" type="float">0 Energy\s*OMP Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="eolb0" type="float">0 Energy\s*OMP Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="eoce0" type="float">0 Energy\s*OMP Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="eose0" type="float">0 Energy\s*OMP Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="eote0" type="float">0 Energy\s*OMP Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="epe1" type="float">1 Energy\s*Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="elb1" type="float">1 Energy\s*Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="ece1" type="float">1 Energy\s*Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="ese1" type="float">1 Energy\s*Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="ete1" type="float">1 Energy\s*Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="empe1" type="float">1 Energy\s*MPI Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="emlb1" type="float">1 Energy\s*MPI Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="emce1" type="float">1 Energy\s*MPI Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="emse1" type="float">1 Energy\s*MPI Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="emte1" type="float">1 Energy\s*MPI Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="eope1" type="float">1 Energy\s*OMP Parallel Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="eolb1" type="float">1 Energy\s*OMP Load Balance:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="eoce1" type="float">1 Energy\s*OMP Communication Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="eose1" type="float">1 Energy\s*OMP Serialisation Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="eote1" type="float">1 Energy\s*OMP Transfer Efficiency:\s*${jube_pat_fp}\s*</pattern>
+            <pattern name="total_time" type="float">Total time:\s*${jube_pat_fp}\s*s</pattern>
+        </patternset>
+
+        <analyser name="h5bench_analyser" reduce="true">
+            <analyse step="run">
+                <file use="slurm">stdout</file>
+                <file use="dlio">job.out</file>
+            </analyse>
+        </analyser>
+
+        <result>
+            <use>h5bench_analyser</use>
+
+            <table name="dlio_pretty" sort="taskspernode" style="pretty">
+                <column>nodes</column>
+                <column>taskspernode</column>
+                <column>readthreads</column>
+                <column>cpufreq</column>
+                <column>slurm_job_id</column>
+                <column title="tpe" format=".3f">tpe</column>
+                <column title="tmpe" format=".3f">tmpe</column>
+                <column title="tope" format=".3f">tope</column>
+                <column title="epe0" format=".3f">epe0</column>
+                <column title="empe0" format=".3f">empe0</column>
+                <column title="eope0" format=".3f">eope0</column>
+                <column title="epe1" format=".3f">epe1</column>
+                <column title="empe1" format=".3f">empe1</column>
+                <column title="eope1" format=".3f">eope1</column>
+                <column title="total_time" format=".3f">total_time</column>
+            </table>
+
+            <table name="h5bench_csv" sort="taskspernode" style="csv">
+                <column>nodes</column>
+                <column>taskspernode</column>
+                <column>readthreads</column>
+                <column>cpufreq</column>
+                <column>slurm_job_id</column>
+                <column title="tpe" format=".3f">tpe</column>
+                <column title="tlb" format=".3f">tlb</column>
+                <column title="tce" format=".3f">tce</column>
+                <column title="tse" format=".3f">tse</column>
+                <column title="tte" format=".3f">tte</column>
+                <column title="tmpe" format=".3f">tmpe</column>
+                <column title="tmlb" format=".3f">tmlb</column>
+                <column title="tmce" format=".3f">tmce</column>
+                <column title="tmse" format=".3f">tmse</column>
+                <column title="tmte" format=".3f">tmte</column>
+                <column title="tope" format=".3f">tope</column>
+                <column title="tolb" format=".3f">tolb</column>
+                <column title="toce" format=".3f">toce</column>
+                <column title="tose" format=".3f">tose</column>
+                <column title="tote" format=".3f">tote</column>
+                <column title="epe0" format=".3f">epe0</column>
+                <column title="elb0" format=".3f">elb0</column>
+                <column title="ece0" format=".3f">ece0</column>
+                <column title="ese0" format=".3f">ese0</column>
+                <column title="ete0" format=".3f">ete0</column>
+                <column title="empe0" format=".3f">empe0</column>
+                <column title="emlb0" format=".3f">emlb0</column>
+                <column title="emce0" format=".3f">emce0</column>
+                <column title="emse0" format=".3f">emse0</column>
+                <column title="emte0" format=".3f">emte0</column>
+                <column title="eope0" format=".3f">eope0</column>
+                <column title="eolb0" format=".3f">eolb0</column>
+                <column title="eoce0" format=".3f">eoce0</column>
+                <column title="eose0" format=".3f">eose0</column>
+                <column title="eote0" format=".3f">eote0</column>
+                <column title="epe1" format=".3f">epe1</column>
+                <column title="elb1" format=".3f">elb1</column>
+                <column title="ece1" format=".3f">ece1</column>
+                <column title="ese1" format=".3f">ese1</column>
+                <column title="ete1" format=".3f">ete1</column>
+                <column title="empe1" format=".3f">empe1</column>
+                <column title="emlb1" format=".3f">emlb1</column>
+                <column title="emce1" format=".3f">emce1</column>
+                <column title="emse1" format=".3f">emse1</column>
+                <column title="emte1" format=".3f">emte1</column>
+                <column title="eope1" format=".3f">eope1</column>
+                <column title="eolb1" format=".3f">eolb1</column>
+                <column title="eoce1" format=".3f">eoce1</column>
+                <column title="eose1" format=".3f">eose1</column>
+                <column title="eote1" format=".3f">eote1</column>
+                <column title="total_time" format=".3f">total_time</column>
+            </table>
+        </result>
+
+    </benchmark>
+</jube>
